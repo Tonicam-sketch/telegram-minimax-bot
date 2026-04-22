@@ -9,7 +9,6 @@ MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY")
 MINIMAX_API_URL = "https://api.minimax.chat/v1/text/chatcompletion_v2"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Flask app for health check
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -31,26 +30,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     payload = {
         "model": "abab6.5s-chat",
-        "messages": [{"role": "user", "content": user_message}]
+        "messages": [{"role": "user", "content": user_message}],
+        "tokens_to_generate": 1024
     }
     try:
         response = requests.post(MINIMAX_API_URL, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code != 200:
+            await update.message.reply_text(f"API 错误 {response.status_code}")
+            return
+            
         result = response.json()
-        ai_reply = result.get("choices", [{}])[0].get("message", {}).get("content", "抱歉，无法回答。")
+        
+        if "choices" in result and len(result["choices"]) > 0:
+            ai_reply = result["choices"][0].get("message", {}).get("content", "")
+            if not ai_reply:
+                ai_reply = result["choices"][0].get("text", "抱歉，无法回答。")
+        elif "reply" in result:
+            ai_reply = result["reply"]
+        else:
+            ai_reply = f"未知格式: {str(result)[:200]}"
+        
         await update.message.reply_text(ai_reply)
     except Exception as e:
-        await update.message.reply_text(f"错误：{str(e)}")
+        print(f"错误: {e}")
+        await update.message.reply_text(f"出错了: {str(e)}")
 
 def run_flask():
     port = int(os.getenv("PORT", 10000))
     flask_app.run(host='0.0.0.0', port=port)
 
 def main():
-    # Start Flask in background thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     
-    # Start Telegram bot
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -60,3 +73,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
