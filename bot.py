@@ -64,20 +64,26 @@ def index():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    asyncio.run(bot_app.process_update(update))
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(bot_app.process_update(update))
+    loop.close()
     return 'ok'
 
-if __name__ == '__main__':
+async def setup_bot():
+    global bot_app
     bot_app = Application.builder().token(TELEGRAM_TOKEN).build()
+    await bot_app.initialize()
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # 设置 webhook
     if WEBHOOK_URL:
         webhook_url = f"{WEBHOOK_URL}/webhook"
-        asyncio.run(bot_app.bot.set_webhook(url=webhook_url))
+        await bot_app.bot.set_webhook(url=webhook_url)
         print(f"Webhook 设置为: {webhook_url}")
-    
+
+if __name__ == '__main__':
+    asyncio.run(setup_bot())
     port = int(os.getenv("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
