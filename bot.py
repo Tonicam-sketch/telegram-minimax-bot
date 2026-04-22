@@ -1,23 +1,17 @@
 import os
 import requests
-import threading
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from flask import Flask
+from flask import Flask, request
+import asyncio
 
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY")
 MINIMAX_API_URL = "https://api.minimax.chat/v1/text/chatcompletion_v2"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "")
 
-flask_app = Flask(__name__)
-
-@flask_app.route('/')
-def index():
-    return 'Bot is running!'
-
-@flask_app.route('/health')
-def health():
-    return 'OK'
+app = Flask(__name__)
+bot_app = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('你好！我是基于 MiniMax 的 AI 助手。')
@@ -36,11 +30,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         response = requests.post(MINIMAX_API_URL, json=payload, headers=headers, timeout=30)
         
-        print(f"状态码: {response.status_code}")
-        print(f"响应内容: {response.text[:500]}")
-        
         if response.status_code != 200:
-            await update.message.reply_text(f"API 错误 {response.status_code}: {response.text[:100]}")
+            await update.message.reply_text(f"API 错误 {response.status_code}")
             return
             
         result = response.json()
@@ -49,35 +40,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("API 返回空响应")
             return
         
-        if "choices" in result and result["choices"] and len(result["choices"]) > 0:
+        if "choices" in result and result["choices"]:
             ai_reply = result["choices"][0].get("message", {}).get("content", "")
             if not ai_reply:
-                ai_reply = result["choices"][0].get("text", "抱歉，无法回答。")
+                ai_reply = result["choices"][0].get("text", "")
         elif "reply" in result:
             ai_reply = result["reply"]
         else:
-            ai_reply = f"未知格式: {str(result)[:200]}"
+            ai_reply = "抱歉，无法理解 API 响应"
         
-        await update.message.reply_text(ai_reply)
+        if ai_reply:
+            await update.message.reply_text(ai_reply)
+        else:
+            await update.message.reply_text("抱歉，没有收到回复")
     except Exception as e:
         print(f"错误: {e}")
-        await update.message.reply_text(f"出错了: {str(e)}")
+        await update.message.reply_text(f"出错了: {str(e)[:100]}")
 
-def run_flask():
-    port = int(os.getenv("PORT", 10000))
-    flask_app.run(host='0.0.0.0', port=port)
+@app.route('/')
+def index():
+    return 'Bot is running!'
 
-def main():
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    print("Bot 运行中...")
-    app.run_polling()
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot_app.bot)
+    asyncio.run(bot_app.process_update(update))
+    return 'ok'
 
 if __name__ == '__main__':
-    main()
+    bot_app = Application.builder().token(TELEGRAM_TOKEN).build()
+    bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # 设置 webhook
+    if WEBHOOK_URL:
+        webhook_url = f"{WEBHOOK_URL}/webhook"
+        asyncio.run(bot_app.bot.set_webhook(url=webhook_url))
+        print(f"Webhook 设置为: {webhook_url}")
+    
+    port = int(os.getenv("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
 
