@@ -4,25 +4,27 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from aiohttp import web
 
-API_KEY = os.getenv("API_KEY", "sk-656a3b5a97034e5496fcee067e547cc8")
-API_URL = "https://right.codes/claude-aws/v1/chat/completions"
+API_KEY = os.getenv("API_KEY")
+API_URL = "https://api.minimaxi.com/anthropic/v1/messages"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "")
 
 bot_app = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('你好！我是 AI 助手，有什么可以帮你的吗？')
+    await update.message.reply_text('你好！我是基于 MiniMax 的 AI 助手。')
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     headers = {
         "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
     }
     payload = {
-        "model": "claude-sonnet-4-5",
-        "messages": [{"role": "user", "content": user_message}]
+        "model": "MiniMax-M2.7",
+        "messages": [{"role": "user", "content": user_message}],
+        "max_tokens": 1024
     }
     try:
         response = requests.post(API_URL, json=payload, headers=headers, timeout=30)
@@ -33,9 +35,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         result = response.json()
         
-        if "choices" in result and result["choices"]:
-            ai_reply = result["choices"][0]["message"]["content"]
-            await update.message.reply_text(ai_reply)
+        # Anthropic 格式响应
+        if "content" in result:
+            # 提取 text 类型的内容
+            ai_reply = ""
+            for item in result["content"]:
+                if item.get("type") == "text":
+                    ai_reply += item.get("text", "")
+            
+            if ai_reply:
+                await update.message.reply_text(ai_reply)
+            else:
+                await update.message.reply_text("抱歉，没有收到回复")
         else:
             await update.message.reply_text("抱歉，无法获取回复")
     except Exception as e:
@@ -71,3 +82,4 @@ if __name__ == '__main__':
     
     port = int(os.getenv("PORT", 10000))
     web.run_app(app, host='0.0.0.0', port=port)
+
