@@ -36,13 +36,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         response = requests.post(MINIMAX_API_URL, json=payload, headers=headers, timeout=30)
         
+        print(f"状态码: {response.status_code}")
+        print(f"响应内容: {response.text[:500]}")
+        
         if response.status_code != 200:
-            await update.message.reply_text(f"API 错误 {response.status_code}")
+            await update.message.reply_text(f"API 错误 {response.status_code}: {response.text[:100]}")
             return
             
         result = response.json()
         
-        if "choices" in result and len(result["choices"]) > 0:
+        if not result:
+            await update.message.reply_text("API 返回空响应")
+            return
+        
+        if "choices" in result and result["choices"] and len(result["choices"]) > 0:
             ai_reply = result["choices"][0].get("message", {}).get("content", "")
             if not ai_reply:
                 ai_reply = result["choices"][0].get("text", "抱歉，无法回答。")
