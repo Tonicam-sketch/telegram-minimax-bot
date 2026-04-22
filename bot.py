@@ -2,14 +2,13 @@ import os
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from quart import Quart, request
+from aiohttp import web
 
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY")
 MINIMAX_API_URL = "https://api.minimax.chat/v1/text/chatcompletion_v2"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "")
 
-app = Quart(__name__)
 bot_app = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,19 +55,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"错误: {e}")
         await update.message.reply_text(f"出错了: {str(e)[:100]}")
 
-@app.route('/')
-async def index():
-    return 'Bot is running!'
+async def index(request):
+    return web.Response(text='Bot is running!')
 
-@app.route('/webhook', methods=['POST'])
-async def webhook():
-    data = await request.get_json()
+async def webhook(request):
+    data = await request.json()
     update = Update.de_json(data, bot_app.bot)
     await bot_app.process_update(update)
-    return 'ok'
+    return web.Response(text='ok')
 
-@app.before_serving
-async def setup():
+async def on_startup(app):
     global bot_app
     bot_app = Application.builder().token(TELEGRAM_TOKEN).build()
     await bot_app.initialize()
@@ -81,6 +77,11 @@ async def setup():
         print(f"Webhook 设置为: {webhook_url}")
 
 if __name__ == '__main__':
+    app = web.Application()
+    app.router.add_get('/', index)
+    app.router.add_post('/webhook', webhook)
+    app.on_startup.append(on_startup)
+    
     port = int(os.getenv("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    web.run_app(app, host='0.0.0.0', port=port)
 
