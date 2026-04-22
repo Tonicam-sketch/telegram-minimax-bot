@@ -2,15 +2,14 @@ import os
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from flask import Flask, request
-import asyncio
+from quart import Quart, request
 
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY")
 MINIMAX_API_URL = "https://api.minimax.chat/v1/text/chatcompletion_v2"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "")
 
-app = Flask(__name__)
+app = Quart(__name__)
 bot_app = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58,19 +57,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"出错了: {str(e)[:100]}")
 
 @app.route('/')
-def index():
+async def index():
     return 'Bot is running!'
 
 @app.route('/webhook', methods=['POST'])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), bot_app.bot)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(bot_app.process_update(update))
-    loop.close()
+async def webhook():
+    data = await request.get_json()
+    update = Update.de_json(data, bot_app.bot)
+    await bot_app.process_update(update)
     return 'ok'
 
-async def setup_bot():
+@app.before_serving
+async def setup():
     global bot_app
     bot_app = Application.builder().token(TELEGRAM_TOKEN).build()
     await bot_app.initialize()
@@ -83,7 +81,6 @@ async def setup_bot():
         print(f"Webhook 设置为: {webhook_url}")
 
 if __name__ == '__main__':
-    asyncio.run(setup_bot())
     port = int(os.getenv("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
