@@ -4,29 +4,28 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from aiohttp import web
 
-MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY")
-MINIMAX_API_URL = "https://api.minimax.chat/v1/text/chatcompletion_v2"
+API_KEY = os.getenv("API_KEY", "sk-656a3b5a97034e5496fcee067e547cc8")
+API_URL = "https://right.codes/claude-aws/v1/chat/completions"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "")
 
 bot_app = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('你好！我是基于 MiniMax 的 AI 助手。')
+    await update.message.reply_text('你好！我是 AI 助手，有什么可以帮你的吗？')
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     headers = {
-        "Authorization": f"Bearer {MINIMAX_API_KEY}",
+        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "abab6.5s-chat",
-        "messages": [{"role": "user", "content": user_message}],
-        "tokens_to_generate": 1024
+        "model": "claude-sonnet-4-5",
+        "messages": [{"role": "user", "content": user_message}]
     }
     try:
-        response = requests.post(MINIMAX_API_URL, json=payload, headers=headers, timeout=30)
+        response = requests.post(API_URL, json=payload, headers=headers, timeout=30)
         
         if response.status_code != 200:
             await update.message.reply_text(f"API 错误 {response.status_code}")
@@ -34,23 +33,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         result = response.json()
         
-        if not result:
-            await update.message.reply_text("API 返回空响应")
-            return
-        
         if "choices" in result and result["choices"]:
-            ai_reply = result["choices"][0].get("message", {}).get("content", "")
-            if not ai_reply:
-                ai_reply = result["choices"][0].get("text", "")
-        elif "reply" in result:
-            ai_reply = result["reply"]
-        else:
-            ai_reply = "抱歉，无法理解 API 响应"
-        
-        if ai_reply:
+            ai_reply = result["choices"][0]["message"]["content"]
             await update.message.reply_text(ai_reply)
         else:
-            await update.message.reply_text("抱歉，没有收到回复")
+            await update.message.reply_text("抱歉，无法获取回复")
     except Exception as e:
         print(f"错误: {e}")
         await update.message.reply_text(f"出错了: {str(e)[:100]}")
@@ -84,4 +71,3 @@ if __name__ == '__main__':
     
     port = int(os.getenv("PORT", 10000))
     web.run_app(app, host='0.0.0.0', port=port)
-
