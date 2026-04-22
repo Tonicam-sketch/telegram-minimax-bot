@@ -1,60 +1,66 @@
 import os
-import requests
+import sys
+import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from aiohttp import web
 
-API_KEY = os.getenv("API_KEY")
-API_URL = "https://api.minimaxi.com/anthropic/v1/messages"
+# 添加 Hermes 到 Python 路径
+sys.path.insert(0, '/opt/render/project/src/hermes-agent')
+
+from run_agent import AIAgent
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL", "")
 
 bot_app = None
+hermes_sessions = {}  # 存储每个用户的 Hermes 会话
+
+def get_hermes_agent(user_id):
+    """为每个用户创建独立的 Hermes Agent"""
+    if user_id not in hermes_sessions:
+        hermes_sessions[user_id] = AIAgent(
+            model="anthropic/claude-sonnet-4",
+            max_iterations=50,
+            enabled_toolsets=["core", "file", "web"],
+            quiet_mode=True,
+            platform="telegram"
+        )
+    return hermes_sessions[user_id]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('你好！我是基于 MiniMax 的 AI 助手。')
+    await update.message.reply_text(
+        '你好！我是 Hermes Agent，可以帮你执行各种任务：\n'
+        '- 搜索信息\n'
+        '- 编写代码\n'
+        '- 文件操作\n'
+        '- 执行命令\n\n'
+        '直接发消息给我就可以了！'
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     user_message = update.message.text
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01"
-    }
-    payload = {
-        "model": "MiniMax-M2.7",
-        "messages": [{"role": "user", "content": user_message}],
-        "max_tokens": 1024
-    }
+    
     try:
-        response = requests.post(API_URL, json=payload, headers=headers, timeout=30)
+        # 获取用户的 Hermes Agent
+        agent = get_hermes_agent(user_id)
         
-        if response.status_code != 200:
-            await update.message.reply_text(f"API 错误 {response.status_code}")
-            return
-            
-        result = response.json()
+        # 在后台线程运行 Hermes（因为它是同步的）
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            agent.chat,
+            user_message
+        )
         
-        # Anthropic 格式响应
-        if "content" in result:
-            # 提取 text 类型的内容
-            ai_reply = ""
-            for item in result["content"]:
-                if item.get("type") == "text":
-                    ai_reply += item.get("text", "")
-            
-            if ai_reply:
-                await update.message.reply_text(ai_reply)
-            else:
-                await update.message.reply_text("抱歉，没有收到回复")
-        else:
-            await update.message.reply_text("抱歉，无法获取回复")
+        await update.message.reply_text(response)
     except Exception as e:
         print(f"错误: {e}")
-        await update.message.reply_text(f"出错了: {str(e)[:100]}")
+        await update.message.reply_text(f"出错了: {str(e)[:200]}")
 
 async def index(request):
-    return web.Response(text='Bot is running!')
+    return web.Response(text='Hermes Telegram Bot is running!')
 
 async def webhook(request):
     data = await request.json()
@@ -82,4 +88,3 @@ if __name__ == '__main__':
     
     port = int(os.getenv("PORT", 10000))
     web.run_app(app, host='0.0.0.0', port=port)
-
